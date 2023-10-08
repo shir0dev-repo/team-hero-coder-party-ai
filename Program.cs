@@ -13,7 +13,7 @@ namespace PlayerCoder
         }
     }
 
-    public class MyAI : PartyAIManager
+    public class MyAI : PartyAIManager, ICombatHandler
     {
         public override void ProcessAI()
         {
@@ -21,6 +21,12 @@ namespace PlayerCoder
             int activeHeroID = PartyAIExtensions.ClassIDWithInitiative;
 
             PartyAIExtensions.HandleTurn(activeHeroID);
+            
+        }
+
+        void ICombatHandler.HandleTurn(int activeHeroClassID) {
+            ICombatHandler handler = this;
+            handler.HandleTurn(activeHeroClassID);
         }
     }
 
@@ -52,53 +58,12 @@ namespace PlayerCoder
         /// </summary>
         public static void FallbackAttack()
         {
-            Hero target = TeamHeroCoder.BattleState.foeHeroes.FirstOrDefault(hero => hero.health > 0)!;
-            int defaultAbilityID = TeamHeroCoder.AbilityID.Attack;
 
-            if (target != null) TeamHeroCoder.PerformHeroAbility(defaultAbilityID, target);
-            else Console.WriteLine("Null target. No action taken. This will halt turn cycle.");
-            
         }
 
         public static void HandleTurn(int currentHeroID)
         {
-            switch (currentHeroID)
-            {
-                case var fighterID when fighterID == TeamHeroCoder.HeroClassID.Fighter:
-                    Console.WriteLine("This is a fighter.");
-                    HandleTurnFighter();
-                    break;
 
-                case var wizardID when wizardID == TeamHeroCoder.HeroClassID.Wizard:
-                    Console.WriteLine("This is a wizard.");
-                    HandleTurnWizard();
-                    break;
-
-                case var clericID when clericID == TeamHeroCoder.HeroClassID.Cleric:
-                    Console.WriteLine("This is a cleric.");
-                    HandleTurnCleric();
-                    break;
-                
-                case var rogueID when rogueID == TeamHeroCoder.HeroClassID.Rogue:
-                    Console.WriteLine("This is a rogue.");
-                    HandleTurnRogue();
-                    break;
-                
-                case var monkID when monkID == TeamHeroCoder.HeroClassID.Monk:
-                    Console.WriteLine("This is a monk.");
-                    HandleTurnMonk();
-                    break;
-                
-                case var alchemistID when alchemistID == TeamHeroCoder.HeroClassID.Alchemist:
-                    Console.WriteLine("This is an alchemist.");
-                    HandleTurnAlchemist();
-                    break;
-                
-                default:
-                    Console.WriteLine("No valid class given.");
-                    FallbackAttack();
-                    break;
-            }
         }
 
         /*
@@ -124,6 +89,90 @@ namespace PlayerCoder
 
         private static void HandleTurnCleric()
         {
+
+        }
+
+        private static void HandleTurnRogue()
+        {
+            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
+            //Comment out when not in use.
+            FallbackAttack();
+        }
+
+        private static void HandleTurnMonk()
+        {
+            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
+            //Comment out when not in use.
+            FallbackAttack();
+        }
+
+        private static void HandleTurnAlchemist()
+        {
+            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
+            //Comment out when not in use.
+            FallbackAttack();
+        }
+    }
+
+    public  interface ICombatHandler : IClassActionManager
+    {
+        virtual void HandleTurn(int activeHeroClassID)
+        {
+            switch (activeHeroClassID)
+            {
+                case var fighterID when fighterID == TeamHeroCoder.HeroClassID.Fighter:
+                    Console.WriteLine("This is a fighter.");
+                    HandleTurnFighter();
+                    break;
+
+                case var wizardID when wizardID == TeamHeroCoder.HeroClassID.Wizard:
+                    Console.WriteLine("This is a wizard.");
+                    HandleTurnWizard();
+                    break;
+
+                case var clericID when clericID == TeamHeroCoder.HeroClassID.Cleric:
+                    Console.WriteLine("This is a cleric.");
+                    HandleTurnCleric();
+                    break;
+
+                case var rogueID when rogueID == TeamHeroCoder.HeroClassID.Rogue:
+                    Console.WriteLine("This is a rogue.");
+                    HandleTurnRogue();
+                    break;
+
+                case var monkID when monkID == TeamHeroCoder.HeroClassID.Monk:
+                    Console.WriteLine("This is a monk.");
+                    HandleTurnMonk();
+                    break;
+
+                case var alchemistID when alchemistID == TeamHeroCoder.HeroClassID.Alchemist:
+                    Console.WriteLine("This is an alchemist.");
+                    HandleTurnAlchemist();
+                    break;
+
+                default:
+                    Console.WriteLine("No valid class given.");
+                    FallbackAttack();
+                    break;
+            }
+        }
+    }
+
+    public interface IClassActionManager
+    {
+        private static Hero HeroWithInitiative => TeamHeroCoder.BattleState.heroWithInitiative;
+        virtual void HandleTurnFighter()
+        {
+
+        }
+
+        virtual void HandleTurnWizard()
+        {
+
+        }
+
+        virtual void HandleTurnCleric()
+        {
             //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
             //Comment out when not in use.
             //FallbackAttack();
@@ -131,7 +180,7 @@ namespace PlayerCoder
             #region Shorthand Variables
             List<Hero> partyMembers = TeamHeroCoder.BattleState.playerHeroes;
             Hero targetHero;
-            
+
             List<InventoryItem> playerInventory = TeamHeroCoder.BattleState.playerInventory;
             int elixirItemID = TeamHeroCoder.ItemID.Elixir;
             int elixirAbilityID = TeamHeroCoder.AbilityID.Elixir;
@@ -173,41 +222,41 @@ namespace PlayerCoder
 
             #endregion
 
-            if(playerInventory.ContainsItem(elixirItemID) && HeroWithInitiative.mana <= HeroWithInitiative.maxMana * 0.3f)
+            if (playerInventory.ContainsItem(elixirItemID) && HeroWithInitiative.mana <= HeroWithInitiative.maxMana * 0.3f)
             {
                 targetHero = HeroWithInitiative;
                 int useElixirID = TeamHeroCoder.AbilityID.Elixir;
                 TeamHeroCoder.PerformHeroAbility(useElixirID, targetHero);
                 return;
             }
-            
+
             if (partyMembers.Any(ally => ally.health < ally.maxHealth * 0.5f))
             {
                 targetHero = partyMembers.OrderBy(ally => ally.health / (float)ally.maxHealth).First();
-                
-                int cureSpellID =
             }
         }
 
-        private static void HandleTurnRogue()
+        virtual void HandleTurnRogue()
         {
-            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
-            //Comment out when not in use.
-            FallbackAttack();
+
         }
 
-        private static void HandleTurnMonk()
+        virtual void HandleTurnMonk()
         {
-            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
-            //Comment out when not in use.
-            FallbackAttack();
+
         }
 
-        private static void HandleTurnAlchemist()
+        virtual void HandleTurnAlchemist()
         {
-            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
-            //Comment out when not in use.
-            FallbackAttack();
+
+        }
+        virtual void FallbackAttack()
+        {
+            Hero target = TeamHeroCoder.BattleState.foeHeroes.FirstOrDefault(hero => hero.health > 0)!;
+            int defaultAbilityID = TeamHeroCoder.AbilityID.Attack;
+
+            if (target != null) TeamHeroCoder.PerformHeroAbility(defaultAbilityID, target);
+            else Console.WriteLine("Null target. No action taken. This will halt turn cycle.");
         }
     }
 

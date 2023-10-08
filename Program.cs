@@ -1,4 +1,5 @@
-﻿using TeamHeroCoderLibrary;
+﻿using System.Collections;
+using TeamHeroCoderLibrary;
 
 namespace PlayerCoder
 {
@@ -20,7 +21,6 @@ namespace PlayerCoder
             Console.WriteLine("Processing AI!");
             int activeHeroID = PartyAIExtensions.ClassIDWithInitiative;
 
-            PartyAIExtensions.HandleTurn(activeHeroID);
             
         }
 
@@ -114,7 +114,7 @@ namespace PlayerCoder
         }
     }
 
-    public  interface ICombatHandler : IClassActionManager
+    public interface ICombatHandler : IClassActionManager
     {
         virtual void HandleTurn(int activeHeroClassID)
         {
@@ -173,9 +173,6 @@ namespace PlayerCoder
 
         virtual void HandleTurnCleric()
         {
-            //Placeholder, acts as a failsafe if party member was added but player forgot to update class function.
-            //Comment out when not in use.
-            //FallbackAttack();
 
             #region Shorthand Variables
             List<Hero> partyMembers = TeamHeroCoder.BattleState.playerHeroes;
@@ -185,36 +182,39 @@ namespace PlayerCoder
             int elixirItemID = TeamHeroCoder.ItemID.Elixir;
             int elixirAbilityID = TeamHeroCoder.AbilityID.Elixir;
 
+            int faithEffectID = TeamHeroCoder.StatusEffectID.Faith;
+            int braveEffectID = TeamHeroCoder.StatusEffectID.Brave;
+
             #endregion
 
             //Declaration region for AbilityData, for ease of access later.
             #region ClericAbilityData
 
-            AbilityData resurrection = new()
+            AbilityData resurrectionAbility = new()
             {
                 ID = TeamHeroCoder.AbilityID.Resurrection,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.Resurrection),
             };
 
-            AbilityData cureLight = new()
+            AbilityData cureLightAbility = new()
             {
                 ID = TeamHeroCoder.AbilityID.CureLight,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.CureLight),
             };
 
-            AbilityData cureSerious = new()
+            AbilityData cureSeriousAbility = new()
             {
                 ID = TeamHeroCoder.AbilityID.CureSerious,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.CureSerious),
             };
 
-            AbilityData faith = new()
+            AbilityData faithAbility = new()
             {
                 ID = TeamHeroCoder.AbilityID.Faith,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.Faith),
             };
 
-            AbilityData brave = new()
+            AbilityData braveAbility = new()
             {
                 ID = TeamHeroCoder.AbilityID.Brave,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.Brave),
@@ -222,6 +222,9 @@ namespace PlayerCoder
 
             #endregion
 
+            #region Order of Execution
+
+            //Firstly, check if cleric has more than 30% mana. If not, use a mana potion if available.
             if (playerInventory.ContainsItem(elixirItemID) && HeroWithInitiative.mana <= HeroWithInitiative.maxMana * 0.3f)
             {
                 targetHero = HeroWithInitiative;
@@ -230,10 +233,61 @@ namespace PlayerCoder
                 return;
             }
 
-            if (partyMembers.Any(ally => ally.health < ally.maxHealth * 0.5f))
+            //If low mana but no mana potions, use fallback attack.
+            else if (!playerInventory.ContainsItem(elixirItemID) && HeroWithInitiative.mana <= HeroWithInitiative.maxMana * 0.3f)
             {
-                targetHero = partyMembers.OrderBy(ally => ally.health / (float)ally.maxHealth).First();
+                FallbackAttack();
+                return;
             }
+
+            //Check if party member's health is lower than 50%. Then find the lowest health ally and use the correct corresponding cure spell;
+            //serious if <= 20%, light if > 20% && < 50%.
+            if (partyMembers.Any(ally => ally.health < ally.maxHealth * 0.5f, out List<Hero> lowHealthAllies))
+            {
+                //Gets the lowest health teammate who's health is not zero.
+                targetHero = lowHealthAllies
+                    .Where(ally => ally.health > 0)
+                    .OrderBy(ally => ally.health / (float)ally.maxHealth)
+                    .First();
+
+                float healthAsPercentage = targetHero.health / (float)targetHero.maxHealth;
+                TeamHeroCoder.PerformHeroAbility(healthAsPercentage <= 0.2f ? cureSeriousAbility.ID : cureLightAbility.ID, targetHero);
+                return;
+            }
+
+            //Check if party contains a wizard, then if he has low mana or faith status. Apply if necessary.
+            if (partyMembers.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Wizard && 
+            (ally.statusEffects.Any(effect => effect.id == faithEffectID) || ally.mana / (float)ally.maxMana <= 0.3f), out List<Hero> wizards))
+            {
+                targetHero = wizards.First();
+
+                if (playerInventory.ContainsItem(elixirItemID) && targetHero.mana / targetHero.maxMana <= 0.3f)
+                {
+                    TeamHeroCoder.PerformHeroAbility(elixirAbilityID, targetHero);
+                    return;
+                }
+                else if (HeroWithInitiative.mana > faithAbility.Cost)
+                {
+                    TeamHeroCoder.PerformHeroAbility(faithAbility.ID, targetHero);
+                    return;
+                }
+            }
+
+            //Check if party contains a fighter, and apply brave if he does not already have it
+            if (partyMembers.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Fighter && 
+            !ally.statusEffects.Any(effect => effect.id == braveEffectID), out List<Hero> fighters))
+            {
+                targetHero = fighters.First();
+                if(HeroWithInitiative.mana > braveAbility.Cost)
+                {
+                    TeamHeroCoder.PerformHeroAbility(braveAbility.ID, targetHero);
+                    return;
+                }
+            }
+
+            FallbackAttack();
+
+            #endregion
         }
 
         virtual void HandleTurnRogue()
@@ -252,7 +306,7 @@ namespace PlayerCoder
         }
         virtual void FallbackAttack()
         {
-            Hero target = TeamHeroCoder.BattleState.foeHeroes.FirstOrDefault(hero => hero.health > 0)!;
+            Hero target = TeamHeroCoder.BattleState.foeHeroes.First(hero => hero.health > 0);
             int defaultAbilityID = TeamHeroCoder.AbilityID.Attack;
 
             if (target != null) TeamHeroCoder.PerformHeroAbility(defaultAbilityID, target);
@@ -272,6 +326,28 @@ namespace PlayerCoder
         {
             ID = abilityID;
             Cost = manaCost;
+        }
+    }
+
+    /// <summary>
+    /// Extensions for System.Linq methods, allowing me to more effectively retain variables.
+    /// </summary>
+    static class LinqExtensions
+    {
+        public static bool Any<T>(this IEnumerable<T> source, Func<T, bool> predicate, out List<T> result)
+        {
+            bool satisfyCondition = false;
+            result = new List<T>();
+            foreach(T element in source)
+            {
+                if(predicate(element))
+                {
+                    result.Add(element);
+                    satisfyCondition = true;
+                }
+            }
+
+            return satisfyCondition;
         }
     }
 }

@@ -1,5 +1,4 @@
-﻿using System.Collections;
-using TeamHeroCoderLibrary;
+﻿using TeamHeroCoderLibrary;
 
 namespace PlayerCoder
 {
@@ -9,7 +8,7 @@ namespace PlayerCoder
         {
             Console.WriteLine("Hello World!");
             PartyAIManager partyAIManager = new MyAI();
-            partyAIManager.SetExchangePath("C:/Users/v0100/AppData/LocalLow/Wind Jester Games/Team Hero Coder");
+            partyAIManager.SetExchangePath("C:/Users/Shado/AppData/LocalLow/Wind Jester Games/Team Hero Coder");
             partyAIManager.StartReadingAndProcessingInfiniteLoop();
         }
     }
@@ -41,6 +40,10 @@ namespace PlayerCoder
     /// </summary>
     public interface ICombatHandler : IClassActionManager
     {
+        /// <summary>
+        /// First forking point of the turn handler. Decides which function to execute based on the Hero's class ID.
+        /// </summary>
+        /// <param name="activeHeroClassID">The current hero with initiative. If an invalid value is given, will default to using a regular attack.</param>
         virtual void HandleTurn(int activeHeroClassID)
         {
             switch (activeHeroClassID)
@@ -84,11 +87,35 @@ namespace PlayerCoder
     }
 
     /// <summary>
-    /// Interface for designing class functionality. Separating classes like this allows easy access to changing class actions.
+    /// Interface for designing class functionality.
     /// </summary>
     public interface IClassActionManager
     {
         protected static Hero HeroWithInitiative => TeamHeroCoder.BattleState.heroWithInitiative;
+        private static List<InventoryItem> PlayerInventory => TeamHeroCoder.BattleState.playerInventory;
+        private static List<Hero> AlliedHeroes => TeamHeroCoder.BattleState.playerHeroes;
+
+        private static List<Hero> AlivePartyMembers => TeamHeroCoder.BattleState.playerHeroes
+                .Where(ally => ally.health > 0)
+                .ToList();
+        private static List<Hero> DeadPartyMembers => TeamHeroCoder.BattleState.playerHeroes
+                .Where(ally => ally.health <= 0)
+                .ToList();
+        private static List<Hero> LowHealthHerosSorted => AlivePartyMembers
+                .Where(ally => ally.health > 0)
+                .OrderBy(ally => ally.GetHealthPercent())
+                .ToList();
+
+        //Quick lookup table for whether the party contains a specified class.
+        private static Dictionary<int, bool> PartyClassLookup => new Dictionary<int, bool>()
+        {
+            { TeamHeroCoder.HeroClassID.Fighter, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Fighter) },
+            { TeamHeroCoder.HeroClassID.Wizard, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Wizard) },
+            { TeamHeroCoder.HeroClassID.Cleric, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Cleric) },
+            { TeamHeroCoder.HeroClassID.Rogue, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Rogue) },
+            { TeamHeroCoder.HeroClassID.Monk, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Monk) },
+            { TeamHeroCoder.HeroClassID.Alchemist, AlliedHeroes.Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Alchemist) },
+        };
 
         void HandleTurnFighter()
         {
@@ -102,20 +129,25 @@ namespace PlayerCoder
                 ID = TeamHeroCoder.AbilityID.QuickHit,
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.QuickHit)
             };
-
-            List<InventoryItem> playerInventory = TeamHeroCoder.BattleState.playerInventory;
+            AbilityData etherAbility = new()
+            {
+                ID = TeamHeroCoder.AbilityID.Ether,
+                Cost = -1,
+            };
 
             int etherItemID = TeamHeroCoder.ItemID.Ether;
-            int etherAbilityID = TeamHeroCoder.AbilityID.Ether;
+
             //Priority order of enemies that should be attacked.
-            EnemyTargetPriority targetPriority = new(
+            Queue<int> PriorityQueue = new(new[]
+                {
                 TeamHeroCoder.HeroClassID.Cleric,
                 TeamHeroCoder.HeroClassID.Alchemist,
                 TeamHeroCoder.HeroClassID.Wizard,
                 TeamHeroCoder.HeroClassID.Rogue,
                 TeamHeroCoder.HeroClassID.Monk,
                 TeamHeroCoder.HeroClassID.Fighter
-                );
+                }
+            );
 
             if (!HeroWithInitiative.HasStatusEffect(TeamHeroCoder.StatusEffectID.Brave))
             {
@@ -123,25 +155,25 @@ namespace PlayerCoder
                 return;
             }
 
-            if (playerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.2f)
+            if (PlayerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.2f)
             {
-                FinalizeAbilityCast(etherAbilityID, HeroWithInitiative);
+                FinalizeAbilityCast(etherAbility.ID, HeroWithInitiative);
                 return;
             }
 
             if (HeroWithInitiative.mana >= quickHitAbility.Cost)
             {
-                while (targetPriority.PriorityQueue.Count > 0)
+                while (PriorityQueue.Count > 0)
                 {
-                    int prioFoeID = targetPriority.PriorityQueue.Dequeue();
+                    int prioFoeID = PriorityQueue.Dequeue();
                     Hero? foundHero = TeamHeroCoder.BattleState.foeHeroes.FirstOrDefault(foe => foe.characterClassID == prioFoeID);
 
-                    if(foundHero != null)
+                    if (foundHero != null)
                     {
                         FinalizeAbilityCast(quickHitAbility.ID, foundHero);
                         return;
                     }
-                        
+
                 }
             }
         }
@@ -153,21 +185,16 @@ namespace PlayerCoder
 
         void HandleTurnCleric()
         {
-            //Shortened variable calls to be reused easily.
+            //Shortened variables to make code more readable.
             #region Shorthand Variables
-            Hero? targetHero = null;
-            int targetAbilityID = -1;
 
-            List<InventoryItem> playerInventory = TeamHeroCoder.BattleState.playerInventory;
             int etherItemID = TeamHeroCoder.ItemID.Ether;
-            int useEtherID = TeamHeroCoder.AbilityID.Ether;
-
             int faithEffectID = TeamHeroCoder.StatusEffectID.Faith;
             int braveEffectID = TeamHeroCoder.StatusEffectID.Brave;
 
             #endregion
 
-            //Declaration region for AbilityData, for ease of access later.
+            //Declaration region for AbilityData.
             #region ClericAbilityData
 
             AbilityData resurrectionAbility = new()
@@ -200,26 +227,20 @@ namespace PlayerCoder
                 Cost = TeamHeroCoder.AbilityManaCost.GetManaCostForAbility(TeamHeroCoder.AbilityID.Brave),
             };
 
+            AbilityData etherAbility = new()
+            {
+                ID = TeamHeroCoder.AbilityID.Ether,
+                Cost = -1,
+            };
+
             #endregion
 
             #region PartyData
 
-            List<Hero> alivePartyMembers = TeamHeroCoder.BattleState.playerHeroes
-                .Where(ally => ally.health > 0)
-                .ToList();
-            List<Hero> deadPartyMembers = TeamHeroCoder.BattleState.playerHeroes
-                .Where(ally => ally.health <= 0)
-                .ToList();
-            List<Hero> lowHealthHerosSorted = alivePartyMembers
-                .Where(ally => ally.GetHealthPercent() > 0)
-                .OrderBy(ally => ally.GetHealthPercent())
-                .ToList();
-
-
-            Hero lowestHealthAlly = lowHealthHerosSorted.First();
-            bool partyHasWizard = alivePartyMembers
+            Hero lowestHealthAlly = LowHealthHerosSorted.First();
+            bool partyHasWizard = AlivePartyMembers
                 .Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Wizard);
-            bool partyHasFighter = alivePartyMembers
+            bool partyHasFighter = AlivePartyMembers
                 .Any(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Fighter);
 
             #endregion
@@ -227,32 +248,26 @@ namespace PlayerCoder
             #region Order of Execution
 
             //If any allies are dead, prioritize casting resurrection if possible.
-            if (deadPartyMembers.Count > 0 && HeroWithInitiative.mana > resurrectionAbility.Cost)
+            if (DeadPartyMembers.Count > 0 && HeroWithInitiative.mana > resurrectionAbility.Cost)
             {
-                targetHero = deadPartyMembers.First();
-                targetAbilityID = resurrectionAbility.ID;
-                FinalizeAbilityCast(targetAbilityID, targetHero);
+                FinalizeAbilityCast(resurrectionAbility.ID, DeadPartyMembers.First());
                 return;
             }
 
             //Check if hero has more than 30% mana. If not, use a mana potion if available.
             Console.WriteLine("Checking current mana...");
-            if (playerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.3f)
+            if (PlayerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.3f)
             {
                 Console.WriteLine("Mana low! Using Mana Potion!");
-                targetHero = HeroWithInitiative;
-                targetAbilityID = useEtherID;
-                FinalizeAbilityCast(targetAbilityID, targetHero);
+                FinalizeAbilityCast(etherAbility.ID, HeroWithInitiative);
                 return;
             }
 
             //If low mana but no mana potions, use fallback attack.
-            else if (!playerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.3f)
+            else if (!PlayerInventory.ContainsItem(etherItemID) && HeroWithInitiative.GetManaPercent() < 0.3f)
             {
                 Console.WriteLine("Mana low! Cannot use Mana Potion, attacking instead.");
-                targetHero = null;
-                targetAbilityID = -1;
-                FinalizeAbilityCast(targetAbilityID, targetHero);
+                FallbackAttack();
                 return;
             }
 
@@ -262,64 +277,56 @@ namespace PlayerCoder
             //Check if party member's health is lower than 50%. Then find the lowest health ally and use the correct corresponding cure spell;
             //serious if <= 20%, light if > 20% && < 50%.
             Console.WriteLine("Checking low health allies...");
-            if (lowHealthHerosSorted.Count > 0)
+            if (lowestHealthAlly.GetHealthPercent() < 0.5f)
             {
-                targetHero = lowestHealthAlly;
-
-                targetAbilityID = targetHero.GetHealthPercent() <= 0.2f ?
+                int healAbilityID = lowestHealthAlly.GetHealthPercent() <= 0.2f ?
                     cureSeriousAbility.ID : cureLightAbility.ID;
-                FinalizeAbilityCast(targetAbilityID, targetHero);
+                FinalizeAbilityCast(healAbilityID, lowestHealthAlly);
                 return;
             }
 
             //If party contains a wizard, check if he has low mana or faith status. Apply if necessary.
             if (partyHasWizard)
             {
-                List<Hero> wizards = alivePartyMembers
+                Hero wizard = AlivePartyMembers
                     .Where(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Wizard)
-                    .ToList();
+                    .FirstOrDefault(ally => ally.GetManaPercent() < 0.3f || ally.HasStatusEffect(faithEffectID))!;
 
-                Hero lowManaWizard = wizards
-                    .First(wizard => wizard.GetManaPercent() <= 0.5f);
-
-                Hero notFaithWizard = wizards
-                    .First(wizard => !wizard.HasStatusEffect(faithEffectID));
-
-                if (lowManaWizard != null)
+                if (wizard != null)
                 {
-                    targetHero = lowManaWizard;
-                    TeamHeroCoder.PerformHeroAbility(useEtherID, targetHero);
-                    return;
-                }
-                else if (notFaithWizard != null)
-                {
-                    targetHero = notFaithWizard;
-                    targetAbilityID = faithAbility.ID;
-                    FinalizeAbilityCast(targetAbilityID, targetHero);
-                    return;
+                    if (wizard.GetManaPercent() <= 0.3f)
+                    { 
+                        FinalizeAbilityCast(etherAbility.ID, wizard);
+                        return;
+                    }
+                    else if (!wizard.HasStatusEffect(faithEffectID))
+                    {
+                        FinalizeAbilityCast(faithAbility.ID, wizard);
+                        return;
+                    }
                 }
             }
 
             //If party contains a fighter, apply brave if he does not already have it
             if (partyHasFighter)
             {
-                Hero notBraveFighter = alivePartyMembers
+                Hero notBraveFighter = AlivePartyMembers
                     .Where(ally => ally.characterClassID == TeamHeroCoder.HeroClassID.Fighter)
-                    .First(fighter => !fighter.HasStatusEffect(braveEffectID));
+                    .FirstOrDefault(fighter => !fighter.HasStatusEffect(braveEffectID))!;
 
                 if (notBraveFighter != null)
                 {
-                    targetHero = notBraveFighter;
-                    targetAbilityID = braveAbility.ID;
-                    FinalizeAbilityCast(targetAbilityID, targetHero);
+                    FinalizeAbilityCast(braveAbility.ID, notBraveFighter);
                     return;
                 }
             }
 
+            FallbackAttack();
+
             #endregion
         }
 
-        
+
         void HandleTurnRogue()
         {
 
